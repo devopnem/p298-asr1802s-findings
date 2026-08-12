@@ -1,0 +1,54 @@
+Warning: Permanently added '192.168.1.1' (RSA) to the list of known hosts.
+=== /dev/mem probe attempts ===
+-- try direct 0xc0100000 word reads (bs=4) --
+0x0xa0 => 6c9e6b9e
+0x0xb0 => afe5899e
+0x0x110 => 4f9f4e9f
+0x0x144 => a29fcfec
+0x0x15c => c59fc49f
+0x0x400 => 46b1f8bf
+-- try physical 0x100000 (PAGE_OFFSET offset guess) --
+0x1000a0 => <empty>
+=== full clock-controller DT node ===
+dr-xr-xr-x    2 root     root             0 Aug  4 08:09 .
+dr-xr-xr-x   24 root     root             0 Aug  4 08:09 ..
+-r--r--r--    1 root     root            23 Aug  4 08:09 compatible
+-r--r--r--    1 root     root            17 Aug  4 08:09 name
+-r--r--r--    1 root     root             8 Aug  4 08:09 reg
+-r--r--r--    1 root     root             5 Aug  4 08:09 reg-names
+=== /proc/device-tree root clocks children ===
+=== kallsyms clock symbols (live addresses) ===
+c001f40c t asr1802s_reset_wakeup_event
+c001f444 t asr1802s_clr_wakeup_event
+c001f4d0 t asr1802s_check_sdh_wakeup_event
+c01f4f68 t asr1802s_powermode
+c01f508c t asr1802s_clk_stats_read
+c01f5580 t clk_cpu_round_rate
+c01f55e8 t clk_ddr_round_rate
+c01f5654 t clk_axi_round_rate
+c01f58dc t clk_ddr_get_parent
+c01f5960 t clk_axi_get_parent
+c01f5a38 t clk_axi_init
+c01f5b94 t clk_cpu_init
+c01f5f08 t clk_cpu_recalc_rate
+c01f5f3c t clk_ddr_recalc_rate
+c01f5fb0 t clk_axi_recalc_rate
+c01f6060 t asr1802s_ddr_fc_seq
+c01f6100 t clk_cpu_get_parent
+c01f61dc t clk_ddr_init
+c01f63d8 T asr1802s_get_fc_spinlock
+c01f66c8 t clk_cpu_setrate
+=== module list ===
+Warning: Permanently added '192.168.1.1' (RSA) to the list of known hosts.
+=== single register reads via dd bs=4 (4 bytes) at known MMIO ===
+0x0xa0 LEbytes= => word=0x
+0x0xb0 LEbytes= => word=0x
+0x0x110 LEbytes= => word=0x
+0x0x144 LEbytes= => word=0x
+0x0x15c LEbytes= => word=0x
+0x0x400 LEbytes= => word=0x
+=== confirm kallsyms: our RE functions present ===
+c01f5f08 t clk_cpu_recalc_rate
+c01f61dc t clk_ddr_init
+c01f63d8 T asr1802s_get_fc_spinlock
+c01f66c8 t clk_cpu_setrate
