@@ -202,22 +202,24 @@ NO OBMI in image list or not Appoint FlasherLoadAddress in blf
 ## 5. Read-only configuration (`.cfg`)
 
 A **separate** format, used by `swdl_linux -U <file>`. Parsed by
-`CUploadCfgParser::ParseUploadCfgFile()`. Per-area keys use the prefix format
-`snprintf("%d_%s", n, key)` — note there is no `Image` infix here.
+`CUploadCfgParser::ParseUploadCfgFile()` (`swdl_linux` `0x081297d0`–`0x0812a930`;
+section and key names from the pointer table at `0x8335b48`–`0x8335b90`).
+Per-area keys use `snprintf("%d_%s", n, key)` — no `Image` infix here, and the
+index is 0-based in practice.
 
 ```ini
-Upload_Area_Nums = 1
-
 [Upload_Property]
-Blf_Version         = V2.1.0
-PlatForm_Type       = SPI-NAND
+Upload_Area_Nums    = 1
+Blf_Version         = V2.1.0        ; only V2.0.0 / V2.1.0 / V2.2.0 accepted
+PlatForm_Type       = SPI-NAND     ; goes through GetFlashType, same tokens
+Flash_Family        = SPI-NAND
 Max_Upload_Size     = 0x40000
 ResetUE_AfterUpload = 0
 Reset_DelayTime     = 0
 
 [Upload_Areas_List]
-0_Area_Type                = 0
-0_Area_SubType             = 0
+0_Area_Type                = Flash                  ; must CONTAIN "Flash"
+0_Area_SubType             = Default_Flash_Probe    ; must CONTAIN this string
 0_Area_Partition           = 0
 0_Area_Offset              = 0x00000000
 0_Area_DataSize            = 0x00040000
@@ -225,7 +227,33 @@ Reset_DelayTime     = 0
 0_Area_UploadData_SaveFile = mtd0.bin
 ```
 
-Confirms the same `;`-comment trap applies.
+`Area_Type` and `Area_SubType` are validated by
+`CUploadCfgParser::FindType()` / `::FindSubType()`, which are just
+`std::string::find()` calls for `"Flash"` (5 chars) and
+`"Default_Flash_Probe"` (19 chars) — substring, not equality.
+
+### Trap 5 — `Upload_Area_Nums` must be inside the section
+
+It is read as `GetBlfInt("Upload_Property", "Upload_Area_Nums", 0)`. Putting
+it **before the first `[Section]`** reads as 0 and the parser aborts with
+
+```
+there is no upload area in UploadCfg file, please check
+Parse UploadCfg file Failed
+```
+
+with no hint that the value was simply never found.
+
+### Trap 6 — the locale, again
+
+```
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  locale::facet::_S_create_c_locale name not valid
+```
+
+Run under `LC_ALL=C LANG=C`. And `swdl_linux` needs root; without it the
+binary exits before printing its banner, which looks like a crash rather than
+a permission problem.
 
 Parser feedback strings, useful for bisection:
 
@@ -233,16 +261,16 @@ Parser feedback strings, useful for bisection:
 Parsing UploadCfg file: %s
 there is no upload area in UploadCfg file, please check
 BLF version error, please check
+ResetDelayTime can't be larger than 255
 Number of Area in UploadCfg file is %d
 Upload Area %d parameter:  + SubType/Partition/Offset/DataSize/ResetUE/ResetTimeDelay
+Upload File name is: %s
 Begin to upload data from 0x%x to 0x%x to file %s
 Uploading data with Spare Area from 0x%x to 0x%x to file %s
 ```
 
-**Status: unverified.** The section names `[Upload_Property]` /
-`[Upload_Areas_List]` and the `Area_Type` / `Area_SubType` values are inferred.
-The key names and the `<n>_` prefix are confirmed from the binary. See
-`flash_read_mtd0.cfg` and `flash_read_all.cfg`.
+**Status: syntax confirmed against the binary; the actual USB transfer has not
+yet been exercised against hardware.**
 
 ---
 
