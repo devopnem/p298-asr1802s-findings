@@ -43,6 +43,31 @@ against `nand-dumps/mtd11.bin` (U-Boot) and `nand-dumps/mtd0.bin` (OBM).
 | 24 | `0x7940000` | 6912 KiB  | `MRVL_BBM` (bad-block map) |
 |    | `0x8000000` |           | end — total 128 MiB |
 
+## Slot identity — a factory unit has identical A and B
+
+Verified from `nand-dumps/MANIFEST.sha256`. Within one unit:
+
+| pair | identical? |
+|---|---|
+| `mtd1` == `mtd3` | yes |
+| `mtd2` == `mtd4` | yes |
+| `mtd5`, `mtd6` | both **zero length** (erased in the factory) |
+| `mtd9` == `mtd10` | yes |
+| `mtd11` == `mtd12` (u-boot-a/b) | yes |
+| `mtd13` == `mtd14` (kernel-a/b) | yes |
+| `mtd15` == `mtd16` (rootfs-a/b) | yes |
+| `mtd17` == `mtd18` | yes |
+| `mtd7` vs `mtd8` (DTIM A/B) | **differ** |
+| `mtd19`–`mtd24` | all distinct |
+
+So the factory writes the same image to both slots; only boot-time slot
+selection differs. The same holds on a second physical unit for the pairs it
+provides.
+
+Consequence: a live unit reporting `system=a` tells you nothing about whether
+the B slot is valid — they are the same bytes. A boot failure is therefore not
+a "bad slot" problem unless something has already been written to one of them.
+
 ## Notes
 
 * **Do not confuse mtd offsets with byte offsets into a raw image.** The
