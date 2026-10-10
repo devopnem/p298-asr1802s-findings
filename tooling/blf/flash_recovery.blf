@@ -1,0 +1,105 @@
+; =====================================================================
+; Marvell / ASR SWDownloader BLF  --  Notion R291 (ASR1802S / PXA1802)
+; ---------------------------------------------------------------------
+; VALIDATED offline with the oracle (no hardware needed):
+;   LC_ALL=C LANG=C ./Utilities/TimBuilder/TimBuilder -r flash_recovery.blf
+;   -> NEZHA platform type / Number of images in blf file is 4
+;      / GenerateTim Successfully / TimBuilder Successfully
+;
+; Grammar recovered from swdl_linux (CBlfParser::ParseBlfFile and
+; ::ParseImageInfo) and confirmed by bisection.
+;
+; TWO key corrections vs. the classic/naive blf form:
+;   1. section TIM_Configuration, key Processor_Type, value PXA1802
+;      (NOT "NEZHA" and NOT "Falcon"; those are only the *internal* names
+;       that GetPlatFormType prints back to you)
+;   2. section Flash_Properties, key Flash_Family, value SPI-NAND
+;      (there is NO "FlashType" key anywhere in the parser)
+;
+; GOTCHA: keep ALL ';' comment lines in this header block, before the
+; first [Section]. The parser mis-handles comment lines interleaved
+; between sections and then aborts with "unknown DSAID in ParseDSAInfo".
+;
+; GOTCHA: Trusted MUST stay 0. With Trusted 1 the parser enters
+; ParseDSAInfo and demands a DSA_Algorithm, i.e. it wants to RE-SIGN the
+; TIM. We must not do that: mtd7/mtd8 are already RSA-signed by the
+; vendor and are pushed verbatim.
+;
+; Flash map (from probe_read_from_live_router/proc_partitions.txt --
+; 25 partitions summing to exactly 128 MiB = 0x8000000, so contiguous):
+;   mtd0  OBM       0x0000000   256 KiB   <-- boot-ROM flasher, image 1
+;   mtd7  DTIM-A    0x0100000   256 KiB
+;   mtd8  DTIM-B    0x0140000   256 KiB
+;   mtd11 U-Boot A  0x01F80000  768 KiB
+;   mtd12 U-Boot B  0x02040000  768 KiB   <-- add when mtd12.bin exists
+; Image 1 Load_Address is MANDATORY, otherwise SWDownloader aborts with
+; "NO OBMI in image list or not Appoint FlasherLoadAddress in blf".
+; =====================================================================
+
+[TIM_Configuration]
+Processor_Type     = PXA1802
+Number_of_Images   = 4
+BLF_Version        = V3.0.0
+FlasherLoadAddress = 0x00000000
+Trusted            = 0
+ProductionMode     = 0
+Version            = V3.0.0
+Issue_Date         = 2026-10-10
+OEM_UniqueID       = NOTION_R291_P298_N13
+
+; Only Flash_Family is mandatory here (verified by bisection: every other
+; Flash_Properties key parses fine when omitted). Flash_NandID / Data_Area_Size
+; / Spare_Area_Size are deliberately LEFT OUT -- they are NAND-part-specific and
+; we have no reliable source for them on a bricked board. Flash_Block_Size is
+; taken from /etc/fw_env.config (erasesize 0x20000).
+[Flash_Properties]
+Flash_Family     = SPI-NAND
+Flash_Block_Size = 0x20000
+Erase_All_Flash  = 0
+Reset_BBT        = 0
+
+[Image_List]
+1_Image_Path                = mtd0.bin
+1_Image_Type                = OBM
+1_Image_ID_Name             = OBMI
+1_Image_Image_ID            = OBMI
+1_Image_Next_Image_ID       = 2
+1_Image_Load_Address        = 0x00000000
+1_Image_Flash_Entry_Address = 0x00000000
+1_Image_Partition_Number    = 0
+1_Image_Erase_Size          = 0x20000
+1_Image_Tim_Included        = 1
+1_Image_Enable              = 1
+2_Image_Path                = mtd7.bin
+2_Image_Type                = PRIMARY
+2_Image_ID_Name             = TIMH
+2_Image_Image_ID            = TIMH
+2_Image_Next_Image_ID       = 3
+2_Image_Load_Address        = 0x00000000
+2_Image_Flash_Entry_Address = 0x01000000
+2_Image_Partition_Number    = 7
+2_Image_Erase_Size          = 0x20000
+2_Image_Tim_Included        = 1
+2_Image_Enable              = 1
+3_Image_Path                = mtd8.bin
+3_Image_Type                = PRIMARY
+3_Image_ID_Name             = TIMH
+3_Image_Image_ID            = TIMH
+3_Image_Next_Image_ID       = 4
+3_Image_Load_Address        = 0x00000000
+3_Image_Flash_Entry_Address = 0x01400000
+3_Image_Partition_Number    = 8
+3_Image_Erase_Size          = 0x20000
+3_Image_Tim_Included        = 1
+3_Image_Enable              = 1
+4_Image_Path                = mtd11.bin
+4_Image_Type                = PRIMARY
+4_Image_ID_Name             = UBOOT_A
+4_Image_Image_ID            = UBOOT_A
+4_Image_Next_Image_ID       = 0
+4_Image_Load_Address        = 0x00000000
+4_Image_Flash_Entry_Address = 0x01F80000
+4_Image_Partition_Number    = 11
+4_Image_Erase_Size          = 0x20000
+4_Image_Tim_Included        = 1
+4_Image_Enable              = 1

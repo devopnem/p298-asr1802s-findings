@@ -4,10 +4,15 @@ Primary-source findings captured from a **Notion R291** (sold by Ooredoo as **R2
 HW version `P298_N13`, board codename `KAGU` / `ASR1826s`) router, powered by an
 **ASR Microelectronics ASR1802S** SoC (ARM Cortex-A7, Marvell-MMP-derived).
 
-This repository contains **only data actually read out of the device** (kernel probes,
-full NAND dumps, factory firmware backups, PCB photos, chip markings) and nothing else:
-no patches, no porting work, no personal analysis. It is meant as a citable reference
-for developers working on this platform (Linux mainlining, OpenWrt, bootloader work).
+This repository contains **data actually read out of the device** (kernel probes,
+full NAND dumps, factory firmware backups, PCB photos, chip markings), plus the
+**reproducible flash-tooling configuration files** used on it — nothing else:
+no patches, no porting work, no narrative analysis. It is meant as a citable
+reference for developers working on this platform (Linux mainlining, OpenWrt,
+bootloader work).
+
+Narrative analysis and the porting effort live in the main workspace repository,
+not here.
 
 ## Device identity (as observed from the device itself)
 
@@ -61,7 +66,39 @@ firmware-backup/            Factory firmware read back from the unit (system slo
 
 bootloader/
 └── mtd-partitions.txt      MTD partition table as reported by the running system
+
+tooling/                    Flash tooling: format spec, our configs, tool inventory
+├── README.md               How to run the configs; no vendor binaries are redistributed
+├── blf/
+│   ├── swdownloader-blf-spec.md   Marvell/ASR `.blf` + `.cfg` format reference,
+│   │                             recovered from the tool binary and verified
+│   ├── flash-map.md               Verified 128 MiB SPI-NAND address map
+│   ├── flash_recovery.blf         Write config: OBM + DTIM A/B + U-Boot A
+│   ├── flash_read_mtd0.cfg        Read-only: 256 KiB at 0x0 (the OBM)
+│   └── flash_read_all.cfg         Read-only: all 25 partitions, 128 MiB
+└── flashing-tools/         One README per vendor tool - name, version, build date,
+    ├── README.md           file sizes, md5 checksums, and why none of them can
+    ├── Marvell_SWDownloader_v4.8.8.2/README.md      write this board. Binaries excluded.
+    ├── Marvell_SwUpgrade_P_V1.05/README.md
+    ├── Marvell_SwUpgrade_C_v1.03/README.md
+    └── ONTIM_Marvell_MultiDL_v1.4.3.72/README.md
 ```
+
+### About `tooling/`
+
+The vendor flashing tools are proprietary Marvell/ASR binaries and are **not
+redistributed here**. `tooling/flashing-tools/` records only the exact product
+name, version, build date, file sizes and md5 checksums so the same tool can be
+identified and verified, plus the conclusions reached about each.
+
+`tooling/blf/` contains our own configuration files. `flash_recovery.blf`
+parses cleanly and passes the vendor toolchain's own offline validator; the
+write it performs is blocked by a missing vendor binary, documented in
+`swdownloader-blf-spec.md` section 6. The two `.cfg` files drive the
+**read-only** flash-dump path, which needs no vendor blobs and is the way to
+establish what is actually on the chip.
+
+All of it runs under `LC_ALL=C LANG=C`; the 2012-2015 binaries abort otherwise.
 
 ## Verification
 
@@ -80,5 +117,7 @@ NVM/calibration data; treat them as private unit data if you flash or redistribu
 
 ## Useful cross-references (external work)
 
+- Main workspace repository (porting effort, narrative analysis):
+  https://github.com/devopnem/notion-r291
 - Linux RFC series for ASR1802S: https://github.com/devopnem/linux-asr1802s-rfc
 - OpenWrt port: https://github.com/openwrt/openwrt/pull/24614 (branch `asr1802s-kagu-wip`)
