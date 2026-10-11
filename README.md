@@ -1,8 +1,33 @@
-# r291-asr1802s-findings
+# p298-asr1802s-findings
 
-Primary-source findings captured from a **Notion R291** (sold by Ooredoo as **R291 V2**,
-HW version `P298_N13`, board codename `KAGU` / `ASR1826s`) router, powered by an
+Primary-source findings captured from a **Notion P298** router (hardware version
+`P298_N13`, board codename `KAGU` / `ASR1826s`), powered by an
 **ASR Microelectronics ASR1802S** SoC (ARM Cortex-A7, Marvell-MMP-derived).
+
+## Why "P298" and not "R291"
+
+This device is also sold as the **Ooredoo R291 V2**, and that string appears in
+its own firmware (`EXTERNAL_VERSION = Ooredoo-R291-V2`, inside
+`firmware-backup/rootfs-a.bin` at `/etc/default.prop`). It is nonetheless the
+wrong name to use for the hardware, for two reasons:
+
+1. **It is ambiguous.** A completely unrelated product — **MediaTek MT7621A,
+   MIPS, Linux 3.10.108** — is also sold as a "Notion R291". Searching the
+   model string finds both.
+2. **The hardware does not use it.** `P298` is what the board actually carries:
+   the silkscreen reads `hardware version P298_N13`, the U-Boot banner reads
+   `ASR KAGU EVB P298`, ASR's own kernel build string is
+   `BB14.07_asr1826sP298_rls3188_...`, and the device's TR-069 model is
+   `P298M22I_Ooredoo_Tuni_R2921_1G` — `P298` first.
+
+Both firmware images share the same base software, which is how the R291 name
+came to be associated with this board. **P298 is the platform name** used in
+this repository, in the DTS (`asr,asr1826s-p298`) and in the workspace repo.
+The string `R291` still appears inside the raw dumps because it is genuinely
+present in the device's own firmware; that is preserved as evidence, not
+endorsed as the product name.
+
+## Contents
 
 This repository contains **data actually read out of the device** (kernel probes,
 full NAND dumps, factory firmware backups, PCB photos, chip markings), plus the
@@ -118,6 +143,6 @@ NVM/calibration data; treat them as private unit data if you flash or redistribu
 ## Useful cross-references (external work)
 
 - Main workspace repository (porting effort, narrative analysis):
-  https://github.com/devopnem/notion-r291
+  https://github.com/devopnem/notion-p298
 - Linux RFC series for ASR1802S: https://github.com/devopnem/linux-asr1802s-rfc
 - OpenWrt port: https://github.com/openwrt/openwrt/pull/24614 (branch `asr1802s-kagu-wip`)
