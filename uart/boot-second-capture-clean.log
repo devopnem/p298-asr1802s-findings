@@ -1,0 +1,69 @@
+Finish loading TIM from: 0x0000001C 
+Init DDR: PASS
+Load Image 0x4F424D49 : PASS
+Verify Image: PASS
+Xfer to OBM
+start at 0x003e8000
+SWDownloader 4.9.0.5 for NezhaC
+OBM 4.9.0.0 for NezhaC
+-- Apr 11 2024 - 18:25:10 --
+pFuses->value[0]: 0x43920041
+pFuses->value[1]: 0x00000000
+pFuses->bits.SBE: 0x00000000
+Trusted OBM without ProductBuild
+MMU Enabled
+PMIC ID: 0x00000009
+Reset
+DVC_STATUS_HD:    0x251
+CP_PMU_STATUS_HD: 0x7ff3d
+AP_PMU_STATUS_HD: 0xfff362
+CR5_PC_HD:        0x326b96b7
+CR5_CPSR_HD:      0x5e0a4dd9
+CR5_SPSR_HD:      0x2206feff
+CA7_PC_HD:        0x334da3d8
+CA7_CPSR_HD:      0xe0baf74
+CA7_SPSR_HD:      0x900b49bd
+Core@832 AXI@208
+SecurityInitialization
+CS1 MR8 1: 0x8000ffff
+CS1 MR8 2: 0x0000ffff
+CS0 MR8: 0x80001010
+mrr_temp_value: 0x00000010
+ddr_size: 0x00000008
+CS0 MR5: 0x80000808
+mrr_temp_value: 0x00000008
+DDR Vendor: Winbond
+OOPS: No right DDR PID found
+undefined M26H_LED_ON
+Bus clock: 13MHz QSPI_CLK_RES_CTRL: 0x5b
+tx_desc: 0x403d10
+use_intr=1 en_tx_dma=1 use_xip=1
+SPI-NAND: F35UQA001G is found in table
+SPI-NAND type mfr_id: cd, dev_id: 6161
+Set rx_pins: 4, tx_pins: 4, Read_CMD:0x6b
+AHB data transfer size: 512
+XIP Read mode enabled
+Fixed LUT bit-map: 0x7fc
+block_size=0x20000 page_size=0x800 bitflip_threshold=4
+Bus clock: 52MHz QSPI_CLK_RES_CTRL: 0x15b
+pFlashP->NumBlocks: 1024
+Flash Init Done
+Rsa_Flash_Addr
+0x05fc0000
+Rsa_Erase_size
+0x00040000
+Obm_Flash_Addr
+0x00020000
+rsa_flashaddr_get ok
+InitFlag=0x00000000
+ASR Flag partition have not been erased
+
+
+U-Boot 2014.01-g301f02458 (May 26 2026 - 17:50:03)
+ASR KAGU EVB P298
+
+SoC:   PXA 88AP1829-A0
+I2C:   ready
+DRAM:  128 MiB
+Start=00308000, relocation Offset is: 010f1000
+get_quiet_from_obm params->quiet: 1

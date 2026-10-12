@@ -73,3 +73,8 @@ Start=00308000, relocation Offset is: 010f1000
 get_quiet_from_obm params->quiet: 1
 
 Terminating...
+
+### NOTE ON THIS CAPTURE
+### Taken 2026-10-12 via picocom 3.1, 115200 8N1, /dev/ttyUSB0, FTDI adapter.
+### No writes were performed at any point during these captures.
+### This is the only fully clean capture; later ones are in this directory.
