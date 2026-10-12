@@ -1,0 +1,46 @@
+# USB enumeration observed on the board's USB port — 2026-10-12
+
+Primary-source kernel log from the host while the board was on its UART.
+Captured with the board connected to the host by a DATA cable.
+
+    [146742.040030] usb 1-1: new high-speed USB device number 72 using xhci_hcd
+    [146742.163092] usb 1-1: New USB device found, idVendor=2ecc, idProduct=3002, bcdDevice= 0.00
+    [146742.163526] usb 1-1: New USB device strings: Mfr=3, Product=2, SerialNumber=0
+    [146742.163530] usb 1-1: Product: KSTR
+    [146742.163546] usb 1-1: Manufacturer: ASR
+    [146743.666116] usb 1-1: USB disconnect, device number 72
+
+## What it establishes
+
+  - idVendor 0x2ecc = ASR. Manufacturer string reads "ASR".
+  - idProduct 0x3002, product string "KSTR".
+  - This is a DIFFERENT product id from the LTE modem, which is 0x2ecc:0x3012
+    (see docs/hardware/at_over_usb.txt in the workspace repo). Two distinct
+    functions share the ASR vendor id.
+  - 0x2ecc:0x3002 is the id the SWDownloader ROM-boot protocol uses; the
+    flash_read configs in tooling/blf/ were written expecting exactly this.
+  - The device enumerated for ~1.5 s and then disconnected by itself.
+
+## Why 1.5 s matters
+
+A board sitting in ROM-boot download mode should enumerate and WAIT. A device
+that appears and immediately leaves was most likely not held in that mode — the
+OBM ran its usual path, or its download-wait window timed out.
+
+Every UART capture this session stopped after:
+
+    get_quiet_from_obm params->quiet: 1
+
+and none of the OBM's download-related strings ever appeared:
+
+    User force to download
+    Wait for download change timeout to true...
+    [Non-Prod]Wait for download...
+    bootMode=   isDownload=
+
+## Untested
+
+Whether holding the vendor DTS RESTORE_Key (gpio <0x10 0x31 0x01>, GPIO 16
+pin 49, active low) at power-on, WITH a data cable attached, makes this id
+stay enumerated. A charge-only cable enumerates nothing, which would look
+identical to the wrong button being pressed.
