@@ -1,13 +1,81 @@
 # UART bring-up — primary-source captures and findings
 
 All captures: FTDI USB-serial, 115200 8N1, no flow control, `/dev/ttyUSB0`.
-Taken 2026-10-12. **No writes were performed at any point.**
+
+Captures 1–3 (2026-10-12): **no writes were performed at any point.**
+
+Capture 4 (2026-10-13) differs — see "Writes performed" below. It is the only
+capture in which the unit's environment was modified, and the only one that
+reached a login prompt.
 
 | file | what it is |
 |---|---|
 | `boot-oem-to-uboot.log` | first capture via picocom; fully clean, complete chain |
 | `boot-second-capture-clean.log` | second capture, own tool; clean, same chain |
 | `boot-third-capture-floating-input.log` | third capture; noisy prefix, then clean |
+| `boot-fourth-capture-uboot-hang.log` | fourth capture; boots **all the way to a login prompt** (see below) |
+
+## Capture 4: the unit is not bricked, and boots completely
+
+The fourth capture is the most informative one. With the serial adapter attached
+and no UART RX wire connected, the unit boots the full chain and reaches a
+login prompt:
+
+```
+procd: - init -
+Please press Enter to activate this console.
+```
+
+Pressing Enter yields a root shell. This contradicts the earlier reading that the
+unit "hangs" at `get_quiet_from_obm`: **the stock kernel boots, userspace starts,
+and a console is offered.** Only the U-Boot *shell* is unreachable — the *system*
+is fine.
+
+It also disproves the assumption that the captures stopping at
+`get_quiet_from_obm` meant the board was inert. `quiet=1` suppresses the
+countdown text and U-Boot's prompt, but it does **not** stop U-Boot from running
+`bootcmd` and handing off to the kernel. In a good boot the very next line is:
+
+```
+get_quiet_from_obm params->quiet: 1
+Uncompressing Linux... done, booting the kernel.
+```
+
+So `quiet=1` is a red herring. It is a debug print, not a gate.
+
+Capture 4 also shows the two other UARTs the SoC has, and confirms the PCIe
+hardware the port targets:
+
+```
+pcie-kagu d4220000.pcie: PCIe0.0: link up
+pcie-kagu d4220000.pcie: PCIe1.0: link up
+pci 0000:02:00.0: [10ec:f812] type 00 class 0x028000
+pci 0000:04:00.0: [10ec:818c] type 00 class 0x028000
+```
+
+Two Realtek PCIe radios, both links up at gen 1, with the vendor's
+`pcie_rtl8192fr_pwr_on: on=1` / `pcie_rtl8812fr_pwr_on: on=1` asserting the power
+GPIOs *before* the links come up. That ordering is consistent with the
+`GPIO_ACTIVE_HIGH` polarity this port uses for `reset-gpios`.
+
+## Writes performed (capture 4 only)
+
+From a shell on the booted unit, `fw_setenv` was used to write the U-Boot
+environment on **mtd21** only:
+
+```
+fw_setenv autostart no
+fw_setenv bootdelay 10
+fw_setenv bootcmd "echo ===STOPPING UBOOT FOR DEBUG=== ; version"
+```
+
+`fw_setenv` is a real write to mtd21, not a RAM-only change (unlike `setenv` at
+the U-Boot prompt). mtd21 is the u-boot env partition and is designed to be
+rewritten; no other partition was touched. The intended original value is
+`bootcmd=mrvlboot`, recoverable from `nand-dumps/mtd21.bin`.
+
+**Unit state after capture 4: does not boot.** U-Boot starts, prints its banner
+and `get_quiet_from_obm params->quiet: 1`, then produces no further output.
 
 ## The unit is not bricked
 
@@ -32,7 +100,7 @@ dead bootloader, RAM, or flash.
 
 ## The fault
 
-Every capture stops at exactly the same place:
+Captures 1–3 stop at exactly the same place:
 
 ```
 get_quiet_from_obm params->quiet: 1
@@ -40,7 +108,70 @@ get_quiet_from_obm params->quiet: 1
 
 The first picocom capture showed `Terminating...` after this line. Later
 captures do not — the board simply produces nothing further. It does not reach
-a usable prompt, and it does not boot.
+a usable prompt.
+
+**Capture 4 revises this.** With the adapter attached the same stop point is
+followed by a complete boot to a login prompt. The boot was never broken; what
+was broken was the *ability to observe and interact with it*, and captures 1–3
+mistook silence for a hang.
+
+## The NAND dumps are from a different firmware generation
+
+This is the most consequential finding from capture 4, and it bounds what the
+existing backups can be used for.
+
+The U-Boot that actually **runs** on the unit is not present in any partition we
+hold:
+
+| source | version string |
+|---|---|
+| unit, running (captures 1–4) | `U-Boot 2014.01-g301f02458 (May 26 2026 - 17:50:03)` |
+| `nand-dumps/mtd11.bin`, `mtd12.bin` | `U-Boot 2014.01-g5f745ec (Apr 11 2024 - 18:26:02)` |
+
+A search of all 25 partitions (mtd0–mtd24) finds `g301f02458` **nowhere**, and no
+partition contains any May 2026 build date. `g5f745ec` appears only in mtd11 and
+mtd12.
+
+Consequences:
+
+- **The running bootloader cannot be inspected offline.** Every conclusion
+  about U-Boot behaviour drawn from `mtd11.bin` describes the April 2024 build,
+  not the one on the unit. This is why the hang caused by the new `bootcmd`
+  cannot be explained — the relevant code is not available to read.
+- **`mtd21.bin` is not necessarily this unit's current environment.** It is a
+  valid 20-variable env block from the older generation. Its variables are
+  readable and it is the best available reference for the original `bootcmd`,
+  but it must not be described as a byte-exact backup of this unit's env.
+- Reading the real `mtd11` off the unit would resolve both, and requires either
+  SWDownloader or an external flash programmer.
+
+This also revises the earlier note that the U-Boot build date matches the
+firmware version string `20260526`: that match holds for the **running** image,
+which the dumps do not contain.
+
+## Only one of the SoC's three UARTs is enabled
+
+From the live device tree (`probes/live-device-tree-2026-10-12.dts`):
+
+| node | address | status |
+|---|---|---|
+| `uart@d4017000` | `0xd4017000` | **`okay`** — this is `ttyS0`, the working console |
+| `uart@d4036000` | `0xd4036000` | `disabled` |
+| `uart@d4018000` | `0xd4018000` | `disabled` |
+
+The boot log confirms only one is ever initialised:
+
+```
+pxa2xx-uart.0: ttyS0 at MMIO 0xd4017000 (irq = 59) is a UART1
+```
+
+This explains why the board's other 3-pin debug header produces no output: the
+UART behind it is switched off in the device tree, so no driver programs the
+registers or applies the pinmux. It is a real OEM header whose UART the shipping
+firmware disables. Both directions are dead, not merely unused.
+
+The silkscreen `GND` label on that header is also unreliable — the pad marked
+ground showed no continuity to any other board ground point.
 
 ## Two independent reasons the U-Boot shell is unreachable
 
@@ -66,15 +197,48 @@ The binary does contain the string `Hit any key to stop autoboot: %2d `, so
 `CONFIG_AUTOBOOT_KEYED` is compiled in — the interrupt path exists in the code
 but is never reached.
 
-### 2. `bootcmd=mrvlboot` hangs instead of returning to the CLI
+### 2. `bootcmd=mrvlboot` runs to completion without returning to a prompt
 
 Even reaching the command loop would not be enough: `bootcmd=mrvlboot` runs
-immediately, produces no output under `quiet=1`, and does not return. Both the
-own tool and `picocom` were used to send commands (`echo`, `printenv`,
-`version`) once U-Boot had been up for over a minute. Nothing came back.
+immediately, and the board goes on to boot the kernel rather than offering a
+prompt. Both the own tool and `picocom` were used to send commands (`echo`,
+`printenv`, `version`) once U-Boot had been up for over a minute. Nothing came
+back.
 
-So the env is effectively locked: the shell needs `autostart=no`, and changing
-it with `fw_setenv` needs a booted system.
+**Revised by capture 4:** `fw_setenv autostart no` and `fw_setenv bootdelay 10`
+*were* applied successfully, and the unit then booted the stock kernel normally.
+That is exactly the behaviour of a silent countdown — `quiet=1` hides the
+"Hit any key" text, so the 10 s wait is invisible — but it does **not** stop
+U-Boot from proceeding afterwards.
+
+So the earlier conclusion "the env is effectively locked" is **wrong**. The shell
+needs `autostart=no`, `fw_setenv` can set it from a booted system, and a booted
+system was reachable. The barrier was not the environment.
+
+### What capture 4 leaves unexplained
+
+After `fw_setenv bootcmd "echo ===STOPPING UBOOT FOR DEBUG=== ; version"` and a
+reboot, U-Boot starts, prints its banner and `get_quiet_from_obm params->quiet: 1`,
+and then produces **nothing further** — no `===STOPPING UBOOT FOR DEBUG===`, no
+`version` output, no prompt. The unit does not boot.
+
+Commands typed blindly at that point (`setenv bootcmd mrvlboot`, `saveenv`,
+`reset`, `mrvlboot`) produced no observable effect, and key-spamming through a
+full power cycle did not help.
+
+Since the hang occurs *before* `bootcmd` produces any output, the failure is in
+executing the command string, not in the commands it contains — both `echo` and
+`version` are present and benign in the April 2024 binary. **The cause cannot be
+determined from the dumps**, because the running May 2026 build is not among them
+(see "The NAND dumps are from a different firmware generation").
+
+What was ruled out along the way:
+
+- UART RX/TX pads shorted together — no continuity between them
+- The console TX path — output is received perfectly, so GND and TX are sound
+- The serial adapter itself — TX/RX loopback echoes correctly
+- An unidentified test point — a separate net (650 Ω to ground, held low when
+  powered), not a UART pin
 
 ## OBM download mode exists but was not entered
 
