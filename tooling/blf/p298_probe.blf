@@ -1,0 +1,101 @@
+; =====================================================================
+; P298 recovery BLF — CORRECTED 2026-10-13
+; ---------------------------------------------------------------------
+; Validated end-to-end with the offline oracle, no hardware needed:
+;   LC_ALL=C LANG=C ./Utilities/MakeDownloadPackage/MakeDownloadPackage \
+;       -r p298_fixed.blf -o pkg.zip
+;   -> "Make Download Package successfully...."   exit 0
+;
+; Supersedes flash_recovery.blf, which aborted with
+;   "IFLSWD exception: OBMImage is NULL in prepareDKB list"
+;
+; ---------------------------------------------------------------------
+; THE THREE BUGS THAT CAUSED IT (all found by bisection against a known
+; good vendor blf, DTU-AIR720-MODUL_1.7.2_Luat_V0018_ASR1802.blf):
+;
+; 1. *_Image_Image_ID MUST BE HEX, NOT A BARE STRING.
+;      wrong:  1_Image_Image_ID = OBMI
+;      right:  1_Image_Image_ID = 0x4F424D49      ('O','B','M','I')
+;    The key is parsed as an integer. "OBMI" -> 0, so the DKB builder
+;    never matches the OBMI entry and the ImagesList comes back empty.
+;    *** THIS — not a missing WTMI/TZII blob — was the real blocker. ***
+;    *_Image_ID_Name may stay a plain string; only Image_ID is numeric.
+;
+; 2. *_Image_Erase_Size MUST BE >= THE IMAGE FILE SIZE.
+;      mtd0.bin is 262144 B (256 KiB) and mtd7.bin is 262144 B, so
+;      Erase_Size must be 0x40000, NOT 0x20000.
+;    0x20000 fails with:
+;      "Error: ImageFileSize is larger than ImageEraseSize,ImageID: OBMI"
+;    (The real erase block is 0x20000 per fw_env.config; Erase_Size in a
+;    blf is the region the image occupies, not the NAND block size.)
+;
+; 3. *_Image_Flash_Entry_Address MUST NOT COLLIDE.
+;    Two enabled images sharing a Flash_Entry_Address fail with:
+;      "Error: Images TIMH and OBMI overlap in flash"
+;
+; Verified NON-issues (each tested individually, all still build):
+;   - comments interleaved between sections        (Trap 1 does not bite here)
+;   - BLF_Version V3.0.0 vs V2.0.0
+;   - FlasherLoadAddress present or absent
+;   - dropping [EraseOnly_Option] / [Reserved_Data] /
+;     [Extended_Reserved_Data] / [Flash_Options] / [UE_Options] / [BLF_Version]
+;   - *_Image_Type = OBM or PRIMARY instead of RAW
+;   - Next_Image_ID as an index instead of the next hex ID
+;   - omitting Size_To_CRC_in_bytes / Hash_Algorithm_ID
+;
+; No WTMI and no TZII are required. Confirmed by inspecting the tool's
+; own generated output: DKB_ntimheader.bin carries a single IBKD entry
+; and zero WTMI/TZII literals. Dkb.bin is simply the OBMI payload wrapped
+; in a 4-byte TIM header (here 262148 = 262144 + 4).
+;
+; Output cfg.ini comes back PlatFormType = 6 (NEZHA) and
+; FlashFamilyType = 4 (SPI-NAND) — both correct for this board.
+;
+; FLASH ADDRESSES used (from findings/nand-dumps layout):
+;   mtd0 OBM    0x000000  256 KiB   <-- OBMI
+;   mtd7 DTIM-A 0x100000  256 KiB   <-- TIMH
+; =====================================================================
+
+[TIM_Configuration]
+Number_of_Images = 2
+Number_of_Keys = 0
+Boot_Flash_Signature = 0x5350490A
+Processor_Type = PXA1802
+OEM_UniqueID = 0x21796B53
+Issue_Date = 0x20141006
+Version = 0x00030400
+Trusted = 0
+ProductionMode = 0
+
+[Flash_Properties]
+Flash_Block_Size = 0x20000
+Flash_Family = SPI-NAND
+Erase_All_Flash = 0
+Reset_BBT = 0
+
+[Image_List]
+1_Image_Enable = 0
+1_Image_Tim_Included = 1
+1_Image_Image_ID = 0x54494D48
+1_Image_Next_Image_ID = 0x4F424D49
+1_Image_Path = mtd7.bin
+1_Image_Flash_Entry_Address = 0x01000000
+1_Image_Load_Address = 0xD1101000
+1_Image_Type = RAW
+1_Image_ID_Name = TIMH
+1_Image_Erase_Size = 0x40000
+1_Image_Partition_Number = 7
+1_Image_Size_To_CRC_in_bytes = 0
+
+2_Image_Enable = 0
+2_Image_Tim_Included = 1
+2_Image_Image_ID = 0x4F424D49
+2_Image_Next_Image_ID = 0xFFFFFFFF
+2_Image_Path = mtd0.bin
+2_Image_Flash_Entry_Address = 0x00000000
+2_Image_Load_Address = 0x01C00000
+2_Image_Type = RAW
+2_Image_ID_Name = OBMI
+2_Image_Erase_Size = 0x40000
+2_Image_Partition_Number = 0
+2_Image_Size_To_CRC_in_bytes = 0
