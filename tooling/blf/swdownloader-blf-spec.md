@@ -274,45 +274,176 @@ yet been exercised against hardware.**
 
 ---
 
-## 6. Where the write path stops
+## 6. Write path — SOLVED 2026-10-13
 
-The `.blf` in this directory parses cleanly and passes offline validation, but
-`swdl_linux -D` then fails:
+> **This section previously concluded the write path was dead. That was wrong.**
+
+The error was a bug in our own `.blf`, not a missing vendor blob.
 
 ```
 Platform is NEZHA.....
-Prepare FBF list..... / Prepare FBF list return.....
 Preparing NEZHA DKBlist
 IFLSWD exception: OBMImage is NULL in prepareDKB list
 ```
 
-Thrown by `CIFL_SWD::PrepareTwoStagDKBlist()`:
+### 6a. Root cause: `Image_ID` is numeric
 
-```c
-CTimDescriptor::ImagesList();     /* of  this + 0x3804  -- the DKB TimDescriptor */
-if (list.empty())
-    throw "OBMImage is NULL in prepareDKB list";
+`*_Image_Image_ID` is parsed as an **integer**. Our `flash_recovery.blf` wrote
+`1_Image_Image_ID = OBMI`, which parses as `0`, so the DKB builder never
+matched the entry and the list came back empty.
+
+```ini
+; wrong
+1_Image_Image_ID = OBMI
+; right — ASCII hex of the tag
+1_Image_Image_ID = 0x4F424D49   ; 'O' 'B' 'M' 'I'
 ```
 
-That list is **not** the `.blf` image list. It is a boot-ROM *download package*
-TimDescriptor populated by `CIFL_SWD::GenerateDKBTim()`, and it expects the
-four `WTMI`/`TZII`/`TIMH`/`OBMI` entries listed in §3.
+`*_Image_ID_Name` may stay a plain string. Changing only this key flips
+FAIL → OK.
 
-Verified with `gdb` that the parser stores our identifiers correctly
-(`ImageId` setter called with `OBMI`, `TIMH`, `TIMH`; member at `this + 0x44`).
-Adding synthetic `WTMI` / `TZII` entries, and toggling `BLF_Version` across all
-four accepted values, `Tim_Included` and `Enable`, all leave the error
-unchanged.
+### 6b. `WTMI` and `TZII` are not required
 
-`Marvell_SwUpgrade_C_v1.03`, `Marvell_SwUpgrade_P_V1.05` and
-`ONTIM_Marvell_MultiDL_v1.4.3.72` ship the same `IFL_SWD` library and contain
-the same four identifiers and the same error string, so none of them provides
-an alternative route.
+The four literals in §3 sit next to `%s/temp/TZII.bin`, `%s/temp/WTM_h.bin`,
+`%s/temp/OBM_h.bin` — all **temp files the tool generates**. Proof: run the tool
+on a known-good vendor `.blf` and read its own output.
 
-**Conclusion:** SWDownloader does not flash "a list of MTD dumps". It assembles
-a boot-ROM download package from Marvell-internal support blobs. `TIMH` and
-`OBMI` are available from this repository's dumps; `WTMI` and `TZII` are not
-part of any MTD partition and are not obtainable.
+`DKB_ntimheader.bin` (744 B) holds a single `IBKD` entry and zero `WTMI`/
+`TZII`. `Dkb.bin` is the `OBMI` payload wrapped in a 4-byte TIM header — with
+our images, 262,148 = 262,144 + 4.
+
+Empirically: `TIMH` alone fails, `OBMI` alone fails, `TIMH` + `OBMI`
+succeeds. Two entries, not four.
+
+### 6c. Two more bugs
+
+| what | error | fix |
+|---|---|---|
+| `Erase_Size` < image file size | `ImageFileSize is larger than ImageEraseSize,ImageID: OBMI` | `0x40000` for 256 KiB images |
+| two enabled images sharing `Flash_Entry_Address` | `Images TIMH and OBMI overlap in flash` | distinct addresses |
+
+`Erase_Size` is the region the image occupies, not the NAND block size.
+
+### 6d. Result
+
+`p298_fixed.blf` builds a package from our own `mtd0.bin` + `mtd7.bin`:
+
+```
+LC_ALL=C LANG=C ./Utilities/MakeDownloadPackage/MakeDownloadPackage \
+    -r p298_fixed.blf -o pkg.zip
+# Make Download Package successfully....   exit 0
+```
+
+`cfg.ini` returns `PlatFormType = 6` (NEZHA), `FlashFamilyType = 4`
+(SPI-NAND) — both correct.
+
+### 6d-bis. HAZARD: the tool overwrites the TIMH input image
+
+**`MakeDownloadPackage` rewrites the `TIMH` image in place**, offline, with no
+hardware involved. Reproduced 2026-10-13:
+
+```
+before:  mtd7.bin  262144 B  7de63ddc29453b0a...
+after:   mtd7.bin    248 B  f4e1b35d7e74e84c...
+```
+
+The 248 B file is a freshly generated TIM header (`HMIT`/`IMBO`, vendor
+`Sky!`, dated `0x20141006`) — not our dump. `mtd0.bin` (the `OBMI` image) is
+**not** touched.
+
+This is exactly the write-through risk §6c of the main doc warned about, but it
+fires on the **offline utility**, not only on `-D`. `flashing_tools/
+Marvell_SWDownloader_v4.8.8.2/` holds `mtd7.bin` as a **symlink** into
+`findings/nand-dumps/` — running the tool there would destroy the
+primary-source DTIM dump.
+
+**Rules:**
+- Always run in a scratch directory containing **real copies**.
+- Never run from `flashing_tools/Marvell_SWDownloader_v4.8.8.2/`.
+- `flashing_tools/p298-swd/` is the prepared, safe run directory.
+
+Method: bisected against `DTU-AIR720-MODUL_1.7.2_Luat_V0018_ASR1802.blf`, a
+known-good vendor package for the Air720 **module** (`PXA1202` = WUKONG,
+SPI-NOR). Flipping it to `PXA1802` + `SPI-NAND` — our board — built cleanly,
+which is what located the three bugs.
+
+Verified non-issues, each tested individually: comments between sections,
+`BLF_Version` V2.0.0 vs V3.0.0, `FlasherLoadAddress` present or absent,
+dropping `[EraseOnly_Option]` / `[Reserved_Data]` /
+`[Extended_Reserved_Data]` / `[Flash_Options]` / `[UE_Options]` /
+`[BLF_Version]`, `Image_Type` `OBM`/`PRIMARY` instead of `RAW`, index-style
+`Next_Image_ID`, omitting `Size_To_CRC_in_bytes`.
+
+### 6e. Still open
+
+No USB transfer has been exercised against hardware. See §8.
+
+---
+
+## 8. USB transport — how the handshake actually works
+
+`swdl_linux` needs **no kernel module**. It opens `/dev/bus/usb` and speaks raw
+usbfs, parsing descriptors itself (`End_USB_DEVICE_DESCRIPTOR`,
+`End_USB_CONFIG_DESCRIPTOR`, …). No libusb. The `rmmod wtptp.ko` in its output
+is cleanup of a Marvell module shipped in some Android images; its absence is
+harmless and the tool continues.
+
+### 8a. CLI
+
+```
+./swdl_linux -D BLF_filename  [-T Timeout(seconds)] [-N]
+./swdl_linux -D BLF_filename -S [-T Timeout(seconds)] [-N]   # single device
+./swdl_linux -U Upload_config_filename
+```
+
+`-D` also accepts a compressed download package: *"File format error, please
+input \".zip\" or \".rar\" compressed file."*
+
+Paths are resolved relative to the **executor's directory**, not the cwd.
+Single instance only — *"there is already an swdl_inux is running"*.
+Writes `swdl_linux_wtptp_device_detect.log`.
+
+### 8b. It is a handshake, and it is racy
+
+The device appears briefly then drops — `mtd0` has `USB Enum timeout`, and the
+tool carries `NoEnumerationResponseTimeOutError`. The sequence is:
+
+```
+Please plug your USB device
+Sending Preamble...
+Getting Version...
+Getting type of Device.....
+Open an BootRom Device / Open an BootLoader Device
+```
+
+**The tool must already be running when the board powers up.** Start the tool
+first, then power-cycle. Starting the tool after enumeration has already timed
+out is the most likely reason a download appears to miss.
+
+### 8c. Platform identification table
+
+The tool reads the OBM's identity over USB (`Version: %c%c%c%c`,
+`Date: %08X`, `Processor: %c%c%c%c`) and matches this embedded table:
+
+| codes | platform |
+|---|---|
+| `3215` / `12052009` | `WKNG` (WUKONG = `PXA1202`) |
+| `3301` `3302` `3211` | `MMP3`, `TVTD` |
+| `3304` `3307` `3311` `3308` `3313` | `HELN`, `NZA3`, `HLN2`…`HLN4` |
+
+`NZA3` = Nezha 3. This is our family — `PXA1802` prints `NEZHA platform type`
+in `MakeDownloadPackage` and `cfg.ini` reports `PlatFormType = 6`.
+
+### 8d. VID/PID lead, unconfirmed
+
+Driver databases list `USB\VID_1286&PID_8130` as *"Marvell R WTP: Tools
+package USB Driver for **Nezha**"*, alongside `VID_1286&PID_8101` and
+`VID_8086&PID_c001` (Monahans L). `Marvell_Drivers_v6.4.0.3.zip` ships
+`wtptp.inf` + `amd64\WTPTP.SYS`.
+
+A 2-byte pattern scan of `mtd0.bin` for `0x1286`/`0x8130` returns dozens of
+coincidental hits in instruction encodings and is **not** evidence. Only real
+enumeration (`lsusb`) settles it.
 
 ---
 
