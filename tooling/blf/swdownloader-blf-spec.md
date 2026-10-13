@@ -458,12 +458,57 @@ Consequences, all verified:
   occurrence of the byte pair `cc 2e` decodes as a `call` rel32 displacement.
   Decoded count: `0x2ECC` 0 immediates / 3 coincidences, `0x3002` 0 / 16,
   `0x1286` 0 / 41, `0x8130` 0 / 25.
-- Therefore 4.8.8.2 **cannot** open this device. Not a flag, permission or
-  timing problem — a missing version. The OBM advertises
-  `SWDownloader 4.9.0.5`; Yuge ships `SWDownloader_4_9_1_1`.
+- `swdl_linux` 4.8.8.2 contains **no `0x2ECC` instruction immediate**. Every
+  occurrence of the byte pair `cc 2e` decodes as a `call` rel32 displacement.
+  Decoded count: `0x2ECC` 0 immediates / 3 coincidences, `0x3002` 0 / 16,
+  `0x1286` 0 / 41, `0x8130` 0 / 25.
+
+**That last point does *not* mean 4.8.8.2 rejects the device — see 8e.** The
+missing constant is by design, not incompatibility. The version gap is real
+but is no longer the established cause of the Linux failure.
 
 `tools/usb-watch.py` polls sysfs at ~50 Hz to catch the 1.58 s window;
 `watch -n1 lsusb` cannot.
+
+### 8e. There is no VID filter anywhere — correcting an earlier conclusion
+
+An earlier revision of this file concluded the tools "cannot open this device"
+because no `0x2ECC` constant exists. **That inference was wrong.**
+
+Scanning every download-capable binary across all four toolchains for
+interface GUIDs, in both ASCII and UTF-16:
+
+| binary | GUIDs found |
+|---|---|
+| `SWDownloader.exe` | `f18a0e88-c30c-11d0-8815-00a0c906bed8` |
+| `WtptpDownLoad.dll` (4.8.8.2 and SwUpgrade_C) | same |
+| `SWDConsole.exe`, `FBFDownloader.exe` | same |
+| `ONTIM_Marvell_MultiDL.exe` | three unrelated Office/VSTO GUIDs |
+
+`f18a0e88-c30c-11d0-8815-00a0c906bed8` is **`GUID_DEVINTERFACE_USB_DEVICE`** —
+the interface matching *every* USB device. No vendor-specific GUID appears
+anywhere. No `VID_`/`PID_` hardware-ID string appears in any binary.
+
+The tools therefore enumerate **all** USB devices, open each, and probe for
+the WTPTP protocol. Nothing matches on `0x2ECC` or on the `0x1286` family.
+The absence of a VID constant is by design and says nothing about
+compatibility.
+
+**Consequences:**
+
+- The Windows products have no reason to reject `2ecc:3002` on version
+  grounds. `SWDownloader.exe` 4.8.8.2 may work, and
+  `Marvell_SwUpgrade_P`, `Marvell_SwUpgrade_C` and `ONTIM_Marvell_MultiDL` are
+  all worth trying.
+- The Linux failure has another cause. Leading candidate: a kernel driver
+  claiming the device. If `cdc_acm`, `usb-storage` or similar binds to
+  `2ecc:3002` at enumeration, the vendor tool can no longer reach it —
+  documented as a real failure mode for Yuge ASR module upgrades ("Linux
+  driver conflict"). `tools/usb-watch.py` now reports bound drivers, with a
+  150 ms settle delay after enumeration.
+
+The protocol probe itself is the real version gate, and it has not been
+observed succeeding on either OS. That is the honest state.
 
 ---
 
