@@ -434,16 +434,36 @@ The tool reads the OBM's identity over USB (`Version: %c%c%c%c`,
 `NZA3` = Nezha 3. This is our family — `PXA1802` prints `NEZHA platform type`
 in `MakeDownloadPackage` and `cfg.ini` reports `PlatFormType = 6`.
 
-### 8d. VID/PID lead, unconfirmed
+### 8d. Device identity — measured, 2026-10-13
 
-Driver databases list `USB\VID_1286&PID_8130` as *"Marvell R WTP: Tools
-package USB Driver for **Nezha**"*, alongside `VID_1286&PID_8101` and
-`VID_8086&PID_c001` (Monahans L). `Marvell_Drivers_v6.4.0.3.zip` ships
-`wtptp.inf` + `amd64\WTPTP.SYS`.
+The P298 router enumerates in download mode as:
 
-A 2-byte pattern scan of `mtd0.bin` for `0x1286`/`0x8130` returns dozens of
-coincidental hits in instruction encodings and is **not** evidence. Only real
-enumeration (`lsusb`) settles it.
+```
+2ecc:3002  'KSTR'  'ASR'
+```
+
+present for **1.577 seconds** from power-on, after which the OBM's
+`USB Enum timeout` expires and it drops.
+
+This is **not** `USB\VID_1286&PID_8130` ("Marvell R WTP: Tools package USB
+Driver for Nezha"), which driver databases list. Those are Monahans/PXA-era
+IDs from the module lineage; an earlier note here pointed at them and it was
+wrong for this board. Observed value wins.
+
+Consequences, all verified:
+
+- The board is **not** `PROD`-gated. It does enumerate. `[PROD]Don't enum USB
+  port` did not apply; the behaviour matches `[Non-Prod]Wait for download...`.
+- `swdl_linux` 4.8.8.2 contains **no `0x2ECC` instruction immediate**. Every
+  occurrence of the byte pair `cc 2e` decodes as a `call` rel32 displacement.
+  Decoded count: `0x2ECC` 0 immediates / 3 coincidences, `0x3002` 0 / 16,
+  `0x1286` 0 / 41, `0x8130` 0 / 25.
+- Therefore 4.8.8.2 **cannot** open this device. Not a flag, permission or
+  timing problem — a missing version. The OBM advertises
+  `SWDownloader 4.9.0.5`; Yuge ships `SWDownloader_4_9_1_1`.
+
+`tools/usb-watch.py` polls sysfs at ~50 Hz to catch the 1.58 s window;
+`watch -n1 lsusb` cannot.
 
 ---
 
