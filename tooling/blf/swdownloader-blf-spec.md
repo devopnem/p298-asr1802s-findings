@@ -463,14 +463,89 @@ Consequences, all verified:
   Decoded count: `0x2ECC` 0 immediates / 3 coincidences, `0x3002` 0 / 16,
   `0x1286` 0 / 41, `0x8130` 0 / 25.
 
-**That last point does *not* mean 4.8.8.2 rejects the device — see 8e.** The
-missing constant is by design, not incompatibility. The version gap is real
-but is no longer the established cause of the Linux failure.
+**That last point does *not* mean 4.8.8.2 rejects the device.** The missing
+constant is by design — but the engine still filters, via a VID/PID whitelist.
+See §8f, which supersedes the "cause unknown" conclusion above.
 
 `tools/usb-watch.py` polls sysfs at ~50 Hz to catch the 1.58 s window;
 `watch -n1 lsusb` cannot.
 
-### 8e. There is no VID filter anywhere — correcting an earlier conclusion
+### 8f. ROOT CAUSE FOUND — there IS a VID/PID whitelist, 2026-10-14
+
+> **This overturns 8e below.** There is no *GUID* filter in the Windows DLLs,
+> but the Linux engine **does** filter on VID/PID, via a whitelist table that
+> does not contain `0x2ECC`.
+
+`swdl_linux` is not stripped, so this is read straight from `readelf -sW`:
+
+```
+CBulkDevNonDrv_Linux::FindAllSupportedDevices  0x0813b9a0   1666 bytes
+CBulkDevNonDrv_Linux::ChecHWIds(long,long,long) 0x0813b220     87 bytes
+```
+
+`FindAllSupportedDevices` opens every entry under `/dev/bus/usb` and calls
+`ChecHWIds(handle, idVendor, idProduct)` — `idVendor` and `idProduct` read
+from the device descriptor at **offsets +8 and +10**.
+
+`ChecHWIds` walks a stride-12 array of `{vid, pid, bcdDevice}` and returns 1
+only on a match:
+
+```asm
+lea  eax,[ecx+0xc]        ; first entry
+loop:
+  mov edx,[eax]           ; vid
+  cmp edx,ebx             ; vs wanted vid
+  jne next
+  cmp DWORD PTR [ecx+4],esi   ; vs wanted pid
+  jne next
+  ... bcdDevice compared only if neither side is 0xFFFFFFFF
+  mov eax,0x1             ; match
+next:
+  add eax,0xc
+  test edx,edx            ; vid 0 terminates the scan
+  je end
+```
+
+The array lives at **va `0x083D72E0`, file offset `0x38e2e0`**, reached via
+the global pointer at va `0x08337304`. 30 live entries, every one with
+`bcdDevice = 0xFFFFFFFF` (wildcard):
+
+| VID | PIDs |
+|---|---|
+| `0x8086` Intel | `0xE001`, `0xC001`, `0xD001` |
+| `0x1286` Marvell | `0x8100`–`0x8106`, `0x8111`–`0x8118`, `0x8128`–`0x812A`, `0x8130`, `0x8164`, `0x8165`, `0x8170`, `0x8174`, `0x8175`, `0x8181`, `0x8182`, `0x8189` |
+
+**`0x2ECC` is absent.** That is why every tool silently skips the board: it
+enumerates, `ChecHWIds` returns 0, and nothing is opened. It accounts for
+every observation — no `wtp*.log`, a 0-byte `swdl_linux_wtptp_device_detect.log`,
+and no kernel driver bound.
+
+`0x1286` is the Monahans/Marvell vendor ID from the `wtptp.inf` hardware IDs
+(`USB\VID_1286&PID_8130`). The P298's `0x2ECC` is a different, newer vendor ID,
+which is the same "generation gap" as the 4.7.2.14 → 4.9.0.5 OBM difference.
+
+### 8g. The fix — `tools/swdl-whitelist-patch.py`
+
+Replaces the **last** live entry in place. **4 bytes change**, nothing else:
+
+```
+offset 0x38e43c: 86 12 -> CC 2E     (VID 0x1286 -> 0x2ECC)
+offset 0x38e440: 89 81 -> 02 30     (PID 0x8189 -> 0x3002)
+```
+
+`bcdDevice` stays `0xFFFFFFFF`, the terminator and every byte after the table
+are untouched, and `.text` is byte-identical to the original — the patch is
+data-only. Cost: `0x1286:0x8189` stops being recognised, and we do not own
+one.
+
+Rejected alternative: appending after the terminator. The 12 bytes past it hold
+`0x0813c740` / `0x0813c720`, code addresses that are almost certainly a
+vtable pointer pair; zeroing them risks a crash on any virtual call.
+
+Output `flashing_tools/p298-swd/swdl_linux_p298`. Verified: ELF headers and all
+section headers identical, `.text` sha256 unchanged. **The runtime behaviour is
+still unverified** — `swdl_linux` exits silently without root, so the first
+real run needs `sudo`.
 
 An earlier revision of this file concluded the tools "cannot open this device"
 because no `0x2ECC` constant exists. **That inference was wrong.**
