@@ -543,9 +543,105 @@ Rejected alternative: appending after the terminator. The 12 bytes past it hold
 vtable pointer pair; zeroing them risks a crash on any virtual call.
 
 Output `flashing_tools/p298-swd/swdl_linux_p298`. Verified: ELF headers and all
-section headers identical, `.text` sha256 unchanged. **The runtime behaviour is
-still unverified** — `swdl_linux` exits silently without root, so the first
-real run needs `sudo`.
+section headers identical, `.text` sha256 unchanged.
+
+### 8h. The patch WORKS — one gate remains, 2026-10-14
+
+Live run with the patched binary against the real board:
+
+```
+Begin to detect wtptp device....
+Please plug your USB device
+add DevName:/dev/bus/usb/001/023
+LogFileName  is:.../wtp_dev_bus_usb_001_023.log
+Get type of device failed
+Open device failed
+```
+
+`wtp_dev_bus_usb_001_023.log` — **the per-device log that has never existed
+before this patch.** The whitelist was indeed the gate. The device is now
+found, opened, and spoken to.
+
+The log is a complete handshake transcript:
+
+```
+openUsbPort  m_fdUsb = /dev/bus/usb/001/023....
+ GetTargetMessage after sendpreamble
+ GetWtpMessage...
+ Platform ready status: 0
+Getting Version...
+ GetWtpMessage...
+ Platform ready status: 0
+
+Version: 3311
+Date: 06012014
+Processor: NZA3Unknown platform type
+
+Get type of device failed
+```
+
+So: **USB opened, preamble accepted, platform-ready status 0, version
+retrieved.** The board speaks the protocol and identifies itself. The only
+remaining failure is platform recognition.
+
+### 8i. The last gate — device platform enum
+
+`CWtptpDownLoad::GetDeviceBootType` (0x081361f0):
+
+```asm
+81369fd: cmp  DWORD PTR [esi+0x1c4c],0x12     ; platform enum
+8136a04: jbe  8136a30                          ; <=18 -> dispatch
+8136a06: fprintf(...,"Unknown platform type")
+...
+8136a30: mov  eax,DWORD PTR [esi+0x1c4c]
+8136a36: jmp  DWORD PTR [eax*4+0x83371dc]      ; 19-entry jump table
+```
+
+Enums 0, 6 and 12 also land on the `Unknown platform type` handler, so those
+slots are invalid too. The enum is copied out of a runtime-built record at
+`[esi+0x24]`, the table being assembled by `_GLOBAL__I__...CWtptpDownLoad`
+(0x0812fc40, 10117 bytes) from static `std::string` globals at `0x840683c`…
+
+Known identity strings and their version/date pairs:
+
+| version | date | name |
+|---|---|---|
+| `3215` | `12052009` | `WKNG` |
+| `3301` | `06172011`, `08182011` | `MMP3` |
+| `3302` | `03082012` | `TVTD` |
+| `3304` | `07022012` | `HELN` |
+| `3307` | `01152013`, `04162013` | `NZA3` |
+| `3311` | `06012014` | `HLN2` |
+
+**Our board reports version `3311`, date `06012014`, processor string `NZA3`.**
+The version/date pair belongs to `HLN2` while the processor string says
+`NZA3` — a genuine mismatch, and the most likely reason the lookup resolves to
+an out-of-range enum.
+
+**Not yet resolved:** which enum each name maps to. The version codes exist as
+4-character dwords (one occurrence each), but the dates do **not** appear as
+dwords, so the record layout is string-based and the name→enum mapping needs
+more work. Forcing the enum blindly is unsafe: the jump table is indexed by it,
+so an invalid index would read out of bounds.
+
+**Assessment.** The board answers the WTPTP protocol correctly and its
+identity is only unknown to a 2015-era lookup table. `SWDownloader 4.9.x`
+would carry the right entry. The alternative is patching in the name→enum
+mapping, which is tractable but needs the record layout pinned down first.
+
+### 8j. Recovered protocol constants
+
+Read from disassembly, useful if a native client is ever written:
+
+| command | bytes | source |
+|---|---|---|
+| Preamble | `D3 02 2B 02` | `CWtpComm::SendPreamble` 0x0816d820 |
+| DataHeader | `04 00 00 2A` | `CWtpComm::DataHeader` 0x0816ea00 |
+| VerifyImage | `01 00 00 00 27` | `CWtpComm::VerifyImage` 0x0816eca0 |
+| UploadDataHeader | `10 00 00 00 32` | `CWtpComm::UploadDataHeader` 0x0816f530 |
+
+Full symbol map for `CWtpComm` and `CWtptpDownLoad` is recoverable with
+`readelf -sW swdl_linux | c++filt`; the binary is unstripped and carries DWARF.
 
 An earlier revision of this file concluded the tools "cannot open this device"
 because no `0x2ECC` constant exists. **That inference was wrong.**
