@@ -221,8 +221,22 @@ NEZHA3 platform type
 ```
 
 The `NEZHA3 platform type` string lives at `.rodata` `0x083302EF` and is
-emitted by the `PXA1826` arm of `GetPlatFormType` (`0x0808D4AF`). This
-confirms the mapping without touching hardware.
+emitted by the `PXA1826` arm of `GetPlatFormType` (`0x0808D4AF`).
+
+**What this does and does not prove.** It confirms that `GetPlatFormType`
+reads `Processor_Type` from the BLF and that `PXA1826` reaches the `ePlatForm
+= 15` arm. It does **not** validate the gate itself:
+`MakeDownloadPackage` builds the download package and exits, and never calls
+`CWtptpDownLoad::GetDeviceBootType`, which is where the enum is dispatched.
+Measured: the oracle reports `Make Download Package successfully` for the
+`PXA1802` BLF too. So a passing oracle is a necessary condition, not a
+sufficient one.
+
+The gate analysis in §1–§5 stands on the disassembly alone, which is
+unambiguous: five instruction reads from `GetPlatFormType` through
+`Initilizeparameter` and `InitializeBL` to the jump table, plus the three
+string literals at `0x08406840/44/48`. Only a live run against the board can
+confirm the transfer.
 
 ## 8. Risk to check before a real flash
 
