@@ -9,6 +9,10 @@ Everything below is a **format description**. The analysis of *why* this
 format exists and what blocked us is summarised in the final section and lives
 in full in the main workspace repository.
 
+For the internals of the engine itself — USB transport, the WTP opcode table,
+the image-preparation pipeline, path resolution — see
+**`swdl_linux-internals.md`** in this directory.
+
 ---
 
 ## 1. File shape
@@ -507,12 +511,14 @@ next:
 ```
 
 The array lives at **va `0x083D72E0`, file offset `0x38e2e0`**, reached via
-the global pointer at va `0x08337304`. 30 live entries, every one with
-`bcdDevice = 0xFFFFFFFF` (wildcard):
+the global pointer at va `0x08337304`. **30 stored entries, 29 reachable** —
+the scan loop starts at table+`0xC`, so entry[0] is used only as the
+non-empty-table flag and `0x8086:0xE001` can never match. All have
+`bcdDevice = 0xFFFFFFFF` (wildcard). See `swdl_linux-internals.md` §4.2.
 
 | VID | PIDs |
 |---|---|
-| `0x8086` Intel | `0xE001`, `0xC001`, `0xD001` |
+| `0x8086` Intel | `0xC001`, `0xD001` (stored but unreachable: `0xE001`) |
 | `0x1286` Marvell | `0x8100`–`0x8106`, `0x8111`–`0x8118`, `0x8128`–`0x812A`, `0x8130`, `0x8164`, `0x8165`, `0x8170`, `0x8174`, `0x8175`, `0x8181`, `0x8182`, `0x8189` |
 
 **`0x2ECC` is absent.** That is why every tool silently skips the board: it
@@ -598,47 +604,66 @@ remaining failure is platform recognition.
 ```
 
 Enums 0, 6 and 12 also land on the `Unknown platform type` handler, so those
-slots are invalid too. The enum is copied out of a runtime-built record at
-`[esi+0x24]`, the table being assembled by `_GLOBAL__I__...CWtptpDownLoad`
-(0x0812fc40, 10117 bytes) from static `std::string` globals at `0x840683c`…
+slots are invalid too.
 
-Known identity strings and their version/date pairs:
-
-| version | date | name |
-|---|---|---|
-| `3215` | `12052009` | `WKNG` |
-| `3301` | `06172011`, `08182011` | `MMP3` |
-| `3302` | `03082012` | `TVTD` |
-| `3304` | `07022012` | `HELN` |
-| `3307` | `01152013`, `04162013` | `NZA3` |
-| `3311` | `06012014` | `HLN2` |
-
-**Our board reports version `3311`, date `06012014`, processor string `NZA3`.**
-The version/date pair belongs to `HLN2` while the processor string says
-`NZA3` — a genuine mismatch, and the most likely reason the lookup resolves to
-an out-of-range enum.
-
-**Not yet resolved:** which enum each name maps to. The version codes exist as
-4-character dwords (one occurrence each), but the dates do **not** appear as
-dwords, so the record layout is string-based and the name→enum mapping needs
-more work. Forcing the enum blindly is unsafe: the jump table is indexed by it,
-so an invalid index would read out of bounds.
-
-**Assessment.** The board answers the WTPTP protocol correctly and its
-identity is only unknown to a 2015-era lookup table. `SWDownloader 4.9.x`
-would carry the right entry. The alternative is patching in the name→enum
-mapping, which is tractable but needs the record layout pinned down first.
+> ### SOLVED 2026-10-15 — see `swdl-platform-enum.md`
+>
+> Everything below the jump table in this section is **superseded and was
+> wrong**. Two errors in particular:
+>
+> * The claim that the enum "is copied out of a runtime-built record" that
+>   cannot be read statically is **false**. The identity lookup keys are static
+>   `std::string`s built from `.rodata` literals by the global constructor at
+>   `0x0812FC40`. The full enum → identity table is recovered there.
+> * The version/name pairings above are transposed. `NZA3` is
+>   **version `3311`, date `06012014`** — not `3307`. There is no mismatch on
+>   our board at all.
+>
+> The real cause is much simpler. The enum is **not** derived from the board;
+> it comes straight from the BLF:
+>
+> ```
+> [TIM_Configuration] Processor_Type = PXA1826
+>   -> CBlfParser::GetPlatFormType     -> ePlatForm = 15
+>   -> CIFL_SWD::Initilizeparameter     -> _InstanceParams+0x24
+>   -> CWtptpDownLoad::InitializeBL    -> this+0x1C4C
+>   -> GetDeviceBootType jump table[15]
+> ```
+>
+> `PXA1802` → ePlatForm **6**, which is one of the dead stubs. `PXA1826` →
+> ePlatForm **15**, whose handler tests exactly `06012014` / `NZA3` / `3311` —
+> the identity our board reports.
+>
+> **The fix is a one-token BLF edit, not a binary patch:**
+>
+> ```diff
+> -Processor_Type = PXA1802
+> +Processor_Type = PXA1826
+> ```
+>
+> `PXA1802` prints `NEZHA platform type`; `PXA1826` prints
+> `NEZHA3 platform type`. The board's own processor string is `NZA3`, so the
+> BLF was mis-declaring the SoC family all along.
+>
+> If the binary patch is still wanted as a fallback, the correct constant is
+> `--enum 0x0F`; `0x12` selects the HLN4 / `3313` branch, which is wrong.
 
 ### 8j. Recovered protocol constants
 
 Read from disassembly, useful if a native client is ever written:
 
-| command | bytes | source |
+| command | transmitted bytes | source |
 |---|---|---|
-| Preamble | `D3 02 2B 02` | `CWtpComm::SendPreamble` 0x0816d820 |
-| DataHeader | `04 00 00 2A` | `CWtpComm::DataHeader` 0x0816ea00 |
-| VerifyImage | `01 00 00 00 27` | `CWtpComm::VerifyImage` 0x0816eca0 |
-| UploadDataHeader | `10 00 00 00 32` | `CWtpComm::UploadDataHeader` 0x0816f530 |
+| Preamble | `00 D3 02 2B` (4 B) | `CWtpComm::SendPreamble` 0x0816d820 |
+| DataHeader | `2A <seq> 00 <04 if fast> 04 00 00 00 <size BE32>` (12 B) | `CWtpComm::DataHeader` 0x0816ea00 |
+| VerifyImage | `27 00 00 00 01 00 00 00 <mode>` (9 B) | `CWtpComm::VerifyImage` 0x0816eca0 |
+| UploadDataHeader | `32 00 00 00 10 00 00 00 <4 × u32>` (24 B) | `CWtpComm::UploadDataHeader` 0x0816f530 |
+
+**Correction 2026-10-15.** This table previously listed the constants
+byte-reversed (`D3 02 2B 02`, `04 00 00 2A`, `01 00 00 00 27`,
+`10 00 00 00 32`). Those were the little-endian encodings of the compiler's
+*dword stores*, not the bytes on the wire. The opcode is at **offset 0**.
+Full opcode table in `swdl_linux-internals.md` §5.2.
 
 Full symbol map for `CWtpComm` and `CWtptpDownLoad` is recoverable with
 `readelf -sW swdl_linux | c++filt`; the binary is unstripped and carries DWARF.

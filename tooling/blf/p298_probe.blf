@@ -60,7 +60,7 @@
 Number_of_Images = 2
 Number_of_Keys = 0
 Boot_Flash_Signature = 0x5350490A
-Processor_Type = PXA1802
+Processor_Type = PXA1826
 OEM_UniqueID = 0x21796B53
 Issue_Date = 0x20141006
 Version = 0x00030400
