@@ -92,21 +92,6 @@ firmware-backup/            Factory firmware read back from the unit (system slo
 bootloader/
 └── mtd-partitions.txt      MTD partition table as reported by the running system
 
-tooling/                    Flash tooling: format spec, our configs, tool inventory
-├── README.md               How to run the configs; no vendor binaries are redistributed
-├── blf/
-│   ├── swdownloader-blf-spec.md   Marvell/ASR `.blf` + `.cfg` format reference,
-│   │                             recovered from the tool binary and verified
-│   ├── flash-map.md               Verified 128 MiB SPI-NAND address map
-│   ├── flash_recovery.blf         Write config: OBM + DTIM A/B + U-Boot A
-│   ├── flash_read_mtd0.cfg        Read-only: 256 KiB at 0x0 (the OBM)
-│   └── flash_read_all.cfg         Read-only: all 25 partitions, 128 MiB
-└── flashing-tools/         One README per vendor tool - name, version, build date,
-    ├── README.md           file sizes, md5 checksums, and why none of them can
-    ├── Marvell_SWDownloader_v4.8.8.2/README.md      write this board. Binaries excluded.
-    ├── Marvell_SwUpgrade_P_V1.05/README.md
-    ├── Marvell_SwUpgrade_C_v1.03/README.md
-    └── ONTIM_Marvell_MultiDL_v1.4.3.72/README.md
 ```
 
 ### About `tooling/`
